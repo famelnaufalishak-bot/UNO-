@@ -6,42 +6,37 @@
 <title>Uno online</title>
 <style>
   :root{
-    --bg:#F1EFE8; --surface:#FFFFFF; --surface-1:#F7F6F1;
-    --text:#2C2C2A; --text-2:#5F5E5A; --text-muted:#888780;
-    --border:#D3D1C7; --accent:#378ADD; --danger:#E24B4A;
-    --radius:8px;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --bg:#1a1a19; --surface:#2C2C2A; --surface-1:#242422;
-      --text:#F1EFE8; --text-2:#B4B2A9; --text-muted:#888780;
-      --border:#444441;
-    }
+    --bg:#B91C1C; --surface:#1a1a1a; --surface-1:#262626;
+    --text:#FFFFFF; --text-2:#E8C8C8; --text-muted:#B98888;
+    --border:#3a3a3a; --accent:#FBBF24; --danger:#EF4444;
+    --radius:14px;
   }
   *{box-sizing:border-box;}
   body{
-    margin:0; padding:2rem 1rem; background:var(--bg); color:var(--text);
+    margin:0; padding:2rem 1rem; background:radial-gradient(circle at top,#DC2626,#7F1D1D); color:var(--text);
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     display:flex; justify-content:center; min-height:100vh;
   }
   #app{width:100%; max-width:600px;}
-  h1{font-size:22px;font-weight:600;text-align:center;margin:0 0 1.5rem;}
+  h1{font-size:32px;font-weight:800;text-align:center;margin:0 0 1.5rem;color:#FBBF24;letter-spacing:1px;text-shadow:2px 2px 0 #000;}
   input{
-    width:100%; height:40px; border-radius:var(--radius); border:1px solid var(--border);
-    background:var(--surface); color:var(--text); font-size:16px; padding:0 12px;
+    width:100%; height:44px; border-radius:var(--radius); border:2px solid var(--border);
+    background:var(--surface-1); color:var(--text); font-size:16px; padding:0 14px;
   }
+  input:focus{outline:none;border-color:var(--accent);}
   button{
-    font-family:inherit; font-size:14px; padding:10px 18px; border-radius:var(--radius);
-    border:1px solid var(--border); background:var(--surface); color:var(--text);
+    font-family:inherit; font-size:15px; font-weight:700; padding:12px 20px; border-radius:999px;
+    border:2px solid var(--border); background:var(--surface-1); color:var(--text);
     cursor:pointer;
   }
-  button:hover{background:var(--surface-1);}
-  button:active{transform:scale(0.98);}
+  button:hover{background:#333;}
+  button:active{transform:scale(0.97);}
   button:disabled{opacity:0.4; cursor:not-allowed;}
-  .primary{border-color:var(--accent); color:var(--accent); font-weight:600;}
+  .primary{border-color:var(--accent); color:#1a1a1a; background:var(--accent); font-weight:800;}
+  .primary:hover{background:#f5b50f;}
   .card{
-    background:var(--surface); border:1px solid var(--border); border-radius:12px;
-    padding:1.25rem;
+    background:var(--surface); border:2px solid var(--border); border-radius:20px;
+    padding:1.5rem;
   }
 </style>
 </head>
@@ -51,6 +46,67 @@
 <script>
 const socket = io();
 const COLOR_HEX={red:'#E24B4A',yellow:'#FAC775',green:'#97C459',blue:'#378ADD'};
+
+let audioCtx=null;
+let musicOn=true;
+let musicTimer=null;
+let musicStep=0;
+
+function ensureAudio(){
+  if(!audioCtx){
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  }
+  if(audioCtx.state==='suspended') audioCtx.resume();
+}
+
+function beep(freq,dur,type,vol){
+  if(!audioCtx) return;
+  const osc=audioCtx.createOscillator();
+  const gain=audioCtx.createGain();
+  osc.type=type||'square';
+  osc.frequency.value=freq;
+  gain.gain.value=0;
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  const now=audioCtx.currentTime;
+  gain.gain.setValueAtTime(0,now);
+  gain.gain.linearRampToValueAtTime(vol||0.06,now+0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001,now+dur);
+  osc.start(now);
+  osc.stop(now+dur+0.02);
+}
+
+function sfxPlay(){ ensureAudio(); beep(520,0.09,'square',0.05); setTimeout(()=>beep(680,0.08,'square',0.04),60); }
+function sfxDraw(){ ensureAudio(); beep(220,0.12,'sawtooth',0.04); }
+function sfxWin(){ ensureAudio(); [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,0.22,'triangle',0.06),i*110)); }
+function sfxUno(){ ensureAudio(); beep(880,0.1,'square',0.06); setTimeout(()=>beep(1108,0.14,'square',0.06),90); }
+
+const MELODY=[
+  {n:392,d:0.18},{n:0,d:0.06},{n:440,d:0.18},{n:0,d:0.06},
+  {n:494,d:0.18},{n:0,d:0.06},{n:440,d:0.18},{n:0,d:0.06},
+  {n:392,d:0.18},{n:0,d:0.06},{n:330,d:0.18},{n:0,d:0.06},
+  {n:392,d:0.36},{n:0,d:0.2},
+];
+function scheduleMusic(){
+  if(!musicOn || !audioCtx) return;
+  const note=MELODY[musicStep%MELODY.length];
+  if(note.n>0) beep(note.n,note.d*0.9,'triangle',0.025);
+  musicStep++;
+  musicTimer=setTimeout(scheduleMusic, note.d*1000);
+}
+function startMusic(){
+  ensureAudio();
+  if(musicTimer) return;
+  scheduleMusic();
+}
+function stopMusic(){
+  if(musicTimer){ clearTimeout(musicTimer); musicTimer=null; }
+}
+function toggleMusic(){
+  musicOn=!musicOn;
+  if(musicOn){ startMusic(); } else { stopMusic(); }
+  render();
+}
 
 let view='home';
 let myName='';
@@ -102,6 +158,7 @@ function updateName(v){ myName=v; }
 function updateJoinCode(v){ joinCodeInput=v; }
 
 function createRoom(){
+  startMusic();
   error='';
   socket.emit('create_room', myName || 'Player 1', (res)=>{
     if(!res.ok){ error='Could not create room.'; render(); return; }
@@ -110,6 +167,7 @@ function createRoom(){
   });
 }
 function joinRoom(){
+  startMusic();
   error='';
   const c=(joinCodeInput||'').trim().toUpperCase();
   if(c.length!==4){ error='Enter a 4-letter code.'; render(); return; }
@@ -132,20 +190,29 @@ function playCard(i){
     render();
     return;
   }
+  sfxPlay();
   socket.emit('play_card', {cardIndex:i});
 }
 function chooseColor(c){
+  sfxPlay();
   socket.emit('play_card', {cardIndex:pendingWildIdx, chosenColor:c});
   pendingWildIdx=null;
 }
-function drawCard(){ socket.emit('draw_card'); }
+function drawCard(){ sfxDraw(); socket.emit('draw_card'); }
 function passTurn(){ socket.emit('pass_turn'); }
-function callUno(){ socket.emit('call_uno'); }
-function catchUno(){ socket.emit('catch_uno'); }
+function callUno(){ sfxUno(); socket.emit('call_uno'); }
+function catchUno(){ sfxUno(); socket.emit('catch_uno'); }
 function nextRound(){ socket.emit('next_round'); }
 
+let lastWinnerSeat=undefined;
 socket.on('room_update', (state)=>{ roomState=state; if(state.started) view='game'; render(); });
-socket.on('game_update', (state)=>{ gameState=state; view='game'; render(); });
+socket.on('game_update', (state)=>{
+  if(state.winnerSeat!==null && state.winnerSeat!==lastWinnerSeat){
+    sfxWin();
+  }
+  lastWinnerSeat=state.winnerSeat;
+  gameState=state; view='game'; render();
+});
 
 function canPlayLocal(card){
   const g=gameState;
@@ -162,7 +229,14 @@ function canPlayLocal(card){
 
 function render(){
   const app=document.getElementById('app');
-  let html='<h1>Uno online</h1>';
+  let html='<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:1.5rem;position:relative;">';
+  html+='<h1 style="margin:0;">Uno online</h1>';
+  html+='<button onclick="toggleMusic()" aria-label="Toggle music" style="position:absolute;right:0;width:38px;height:38px;padding:0;border-radius:50%;display:flex;align-items:center;justify-content:center;">'
+    +(musicOn
+      ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M9 18V6l8-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>'
+      : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M9 18V6l8-2v12"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/><line x1="3" y1="3" x2="21" y2="21"/></svg>')
+    +'</button>';
+  html+='</div>';
 
   if(view==='home'){
     html+='<div class="card" style="max-width:380px;margin:0 auto 1rem;">';
@@ -181,7 +255,7 @@ function render(){
     html+='<div class="card" style="max-width:420px;margin:0 auto;">';
     html+='<div style="text-align:center;margin-bottom:1.25rem;">';
     html+='<p style="font-size:12px;color:var(--text-muted);margin:0 0 4px;">room code</p>';
-    html+='<p style="font-size:32px;font-weight:700;letter-spacing:5px;margin:0;">'+roomCode+'</p>';
+    html+='<p style="font-size:36px;font-weight:800;letter-spacing:6px;margin:0;color:var(--accent);text-shadow:2px 2px 0 #000;">'+roomCode+'</p>';
     html+='<p style="font-size:13px;color:var(--text-2);margin:8px 0 0;">Share this code so others can join at this page.</p>';
     html+='</div>';
     html+='<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1.25rem;">';
@@ -215,36 +289,75 @@ function render(){
 
   if(view==='game' && gameState){
     const g=gameState;
-    const otherSeats=[];
-    for(let off=1;off<4;off++){
-      const idx=(seatIdx+off)%4;
-      if(roomState.seats[idx]) otherSeats.push(idx);
+
+    let timeLeft = null;
+    if(g.turnStartedAt && g.turnSeconds){
+      const elapsed = (Date.now()-g.turnStartedAt)/1000;
+      timeLeft = Math.max(0, Math.ceil(g.turnSeconds - elapsed));
     }
 
-    html+='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:1rem;">';
-    roomState.seats.forEach((s,i)=>{
-      if(!s) return;
-      const score=roomState.scores[i]||0;
-      const turnMark = g.turn===i ? ' style="border-color:var(--accent);color:var(--accent);"' : '';
-      html+='<div class="card" '+turnMark+' style="padding:8px 12px;flex:1;min-width:110px;">';
-      html+='<p style="font-size:12px;color:var(--text-muted);margin:0;">'+s.name+(i===seatIdx?' (you)':'')+'</p>';
-      html+='<p style="font-size:13px;margin:2px 0 0;">score '+score+' · '+(typeof g.hands[i]==='number'?g.hands[i]:g.hands[i].length)+' cards</p>';
+    const seatOrder=[];
+    for(let off=0;off<4;off++){
+      const idx=(seatIdx+off)%4;
+      if(roomState.seats[idx]) seatOrder.push(idx);
+    }
+    const positions = seatOrder.length<=2
+      ? ['bottom','top']
+      : seatOrder.length===3
+        ? ['bottom','left','right']
+        : ['bottom','left','top','right'];
+
+    html+='<div style="position:relative;min-height:420px;max-width:520px;margin:0 auto;">';
+
+    seatOrder.forEach((idx,i)=>{
+      const pos=positions[i];
+      const s=roomState.seats[idx];
+      const score=roomState.scores[idx]||0;
+      const cardCount = typeof g.hands[idx]==='number'?g.hands[idx]:g.hands[idx].length;
+      const isTurn = g.turn===idx;
+      let posStyle='';
+      if(pos==='bottom') posStyle='bottom:0;left:50%;transform:translateX(-50%);';
+      if(pos==='top') posStyle='top:0;left:50%;transform:translateX(-50%);';
+      if(pos==='left') posStyle='left:0;top:50%;transform:translateY(-50%);';
+      if(pos==='right') posStyle='right:0;top:50%;transform:translateY(-50%);';
+
+      const ringColor = isTurn ? 'var(--accent)' : 'var(--border)';
+      const initials = (s.name||'P').slice(0,2).toUpperCase();
+
+      html+='<div style="position:absolute;'+posStyle+'text-align:center;">';
+      html+='<div style="position:relative;width:56px;height:56px;margin:0 auto 6px;">';
+      html+='<div style="width:56px;height:56px;border-radius:50%;background:var(--surface-1);border:3px solid '+ringColor+';display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;">'+initials+'</div>';
+      if(isTurn && timeLeft!==null){
+        html+='<div style="position:absolute;top:-8px;right:-8px;background:var(--accent);color:#1a1a1a;border-radius:999px;min-width:26px;height:26px;padding:0 6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;gap:2px;">'
+          +'<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" stroke-width="3"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>'
+          +timeLeft+'</div>';
+      }
+      if(isTurn && s.bot){
+        html+='<div style="position:absolute;top:-8px;right:-8px;background:var(--accent);color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:14px;">…</div>';
+      }
+      if(!isTurn && cardCount===1){
+        html+='<div style="position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:#fff;color:#1a1a1a;border-radius:12px;padding:2px 8px;font-size:10px;font-weight:800;white-space:nowrap;box-shadow:0 2px 4px rgba(0,0,0,0.3);">uno!</div>';
+      }
+      html+='</div>';
+      html+='<p style="font-size:12px;font-weight:600;margin:0;">'+s.name+(idx===seatIdx?' (you)':'')+'</p>';
+      html+='<p style="font-size:11px;color:var(--text-muted);margin:2px 0 0;">score '+score+' · '+cardCount+' cards</p>';
       html+='</div>';
     });
-    html+='</div>';
 
-    html+='<div style="display:flex;align-items:center;justify-content:center;gap:20px;margin:1.25rem 0;">';
+    html+='<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:16px;">';
     html+='<div style="text-align:center;">';
-    html+='<p style="font-size:12px;color:var(--text-muted);margin:0 0 6px;">deck ('+g.deckCount+')</p>';
-    html+=cardBackHTML(52,76);
+    html+='<p style="font-size:11px;color:var(--text-muted);margin:0 0 4px;">deck ('+g.deckCount+')</p>';
+    html+=cardBackHTML(48,70);
     html+='</div>';
     html+='<div style="text-align:center;">';
-    html+='<p style="font-size:12px;color:var(--text-muted);margin:0 0 6px;">current color</p>';
+    html+='<p style="font-size:11px;color:var(--text-muted);margin:0 0 4px;">color</p>';
     html+=cardHTML(g.discardTop,{});
     html+='</div>';
     html+='</div>';
 
-    html+='<p style="text-align:center;font-size:14px;color:var(--text-2);margin-bottom:1rem;min-height:18px;">'+g.message+'</p>';
+    html+='</div>';
+
+    html+='<p style="text-align:center;font-size:14px;color:var(--text-2);margin:1rem 0;min-height:18px;">'+g.message+'</p>';
 
     if(g.unoPenaltyAvailable!==null && g.unoPenaltyAvailable!==seatIdx){
       html+='<div style="text-align:center;margin-bottom:1rem;"><button onclick="catchUno()">Catch! '+roomState.seats[g.unoPenaltyAvailable].name+' forgot uno</button></div>';
@@ -270,12 +383,12 @@ function render(){
 
     if(g.winnerSeat===null){
       const isMyTurn = g.turn===seatIdx;
-      html+='<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">';
+      html+='<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;align-items:center;">';
       const drawLabel = g.drawPending>0 ? 'Draw '+g.drawPending : 'Draw card';
       html+='<button onclick="drawCard()" '+((!isMyTurn||pendingWildIdx!==null)?'disabled':'')+'>'+drawLabel+'</button>';
       html+='<button onclick="passTurn()" '+((!isMyTurn||pendingWildIdx!==null||g.drawPending>0)?'disabled':'')+'>Pass turn</button>';
       if(Array.isArray(myHand) && myHand.length===2){
-        html+='<button onclick="callUno()" '+(g.calledUno[seatIdx]?'disabled':'')+' class="'+(g.calledUno[seatIdx]?'':'primary')+'">'+(g.calledUno[seatIdx]?'Uno called':'Call uno')+'</button>';
+        html+='<div onclick="'+(g.calledUno[seatIdx]?'':'callUno()')+'" style="width:64px;height:64px;border-radius:50%;background:'+(g.calledUno[seatIdx]?'var(--border)':'var(--danger)')+';color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;cursor:pointer;text-align:center;line-height:1.1;">'+(g.calledUno[seatIdx]?'called':'call<br>uno')+'</div>';
       }
       html+='</div>';
     } else {
@@ -291,6 +404,8 @@ function render(){
 
   app.innerHTML=html;
 }
+
+let tickInterval=setInterval(()=>{ if(view==='game' && gameState && gameState.turnStartedAt) render(); }, 1000);
 
 render();
 </script>
