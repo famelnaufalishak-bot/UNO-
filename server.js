@@ -97,6 +97,8 @@ function publicGameState(room, forSeatIdx) {
     calledUno: g.calledUno,
     unoPenaltyAvailable: g.unoPenaltyAvailable,
     activeSeats: g.activeSeats,
+    turnStartedAt: g.turnStartedAt || null,
+    turnSeconds: g.turnSeconds || null,
   };
 }
 
@@ -159,6 +161,7 @@ function startGame(room) {
   };
   broadcastRoom(room);
   broadcastGame(room);
+  startTurnTimer(room);
   maybeRunBot(room);
 }
 
@@ -209,6 +212,7 @@ function checkRoundOver(room) {
       room.scores[idx] += pts;
       g.winnerSeat = idx;
       g.message = seatName(room, idx) + ' wins the round! +' + pts + ' points.';
+      clearTurnTimer(room);
       return true;
     }
   }
@@ -272,6 +276,7 @@ function playCard(room, seatIdx, cardIndex, chosenColor) {
   g.turn = next;
   broadcastRoom(room);
   broadcastGame(room);
+  startTurnTimer(room);
   maybeRunBot(room);
 }
 
@@ -284,6 +289,7 @@ function drawForTurn(room, seatIdx) {
     g.drawType = null;
     g.turn = nextSeat(room, seatIdx);
     broadcastGame(room);
+    startTurnTimer(room);
     maybeRunBot(room);
     return;
   }
@@ -296,6 +302,7 @@ function drawForTurn(room, seatIdx) {
     g.message = seatName(room, seatIdx) + ' drew a card.';
     g.turn = nextSeat(room, seatIdx);
     broadcastGame(room);
+    startTurnTimer(room);
     maybeRunBot(room);
   }
 }
@@ -306,6 +313,7 @@ function passTurn(room, seatIdx) {
   g.turn = nextSeat(room, seatIdx);
   g.message = seatName(room, g.turn) + "'s turn.";
   broadcastGame(room);
+  startTurnTimer(room);
   maybeRunBot(room);
 }
 
@@ -351,6 +359,47 @@ function bestBotIndex(room, seatIdx) {
   return -1;
 }
 
+const TURN_SECONDS = 20;
+
+function clearTurnTimer(room) {
+  if (room.turnTimeout) {
+    clearTimeout(room.turnTimeout);
+    room.turnTimeout = null;
+  }
+}
+
+function startTurnTimer(room) {
+  clearTurnTimer(room);
+  if (!room.game || room.game.winnerSeat !== null) return;
+  const seat = room.seats[room.game.turn];
+  if (!seat || seat.bot) return;
+  room.game.turnStartedAt = Date.now();
+  room.game.turnSeconds = TURN_SECONDS;
+  room.turnTimeout = setTimeout(() => {
+    if (!room.game || room.game.winnerSeat !== null) return;
+    const idx = room.game.turn;
+    room.game.message = seatName(room, idx) + ' ran out of time and drew a card.';
+    if (room.game.drawPending > 0) {
+      drawCards(room, idx, room.game.drawPending);
+      room.game.drawPending = 0;
+      room.game.drawType = null;
+      room.game.turn = nextSeat(room, idx);
+      broadcastGame(room);
+      startTurnTimer(room);
+      maybeRunBot(room);
+      return;
+    }
+    drawCards(room, idx, 1);
+    const drawn = room.game.hands[idx][room.game.hands[idx].length - 1];
+    if (!(drawn && canPlay(room, drawn))) {
+      room.game.turn = nextSeat(room, idx);
+    }
+    broadcastGame(room);
+    startTurnTimer(room);
+    maybeRunBot(room);
+  }, TURN_SECONDS * 1000);
+}
+
 function maybeRunBot(room) {
   const g = room.game;
   if (!g || g.winnerSeat !== null) return;
@@ -368,6 +417,7 @@ function maybeRunBot(room) {
         g.drawType = null;
         g.turn = nextSeat(room, idx);
         broadcastGame(room);
+        startTurnTimer(room);
         maybeRunBot(room);
         return;
       }
@@ -379,6 +429,7 @@ function maybeRunBot(room) {
         g.message = seatName(room, idx) + ' drew a card.';
         g.turn = nextSeat(room, idx);
         broadcastGame(room);
+        startTurnTimer(room);
         maybeRunBot(room);
         return;
       }
