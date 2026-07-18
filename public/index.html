@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uno online</title>
+<style>
+  :root{
+    --bg:#F1EFE8; --surface:#FFFFFF; --surface-1:#F7F6F1;
+    --text:#2C2C2A; --text-2:#5F5E5A; --text-muted:#888780;
+    --border:#D3D1C7; --accent:#378ADD; --danger:#E24B4A;
+    --radius:8px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#1a1a19; --surface:#2C2C2A; --surface-1:#242422;
+      --text:#F1EFE8; --text-2:#B4B2A9; --text-muted:#888780;
+      --border:#444441;
+    }
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; padding:2rem 1rem; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    display:flex; justify-content:center; min-height:100vh;
+  }
+  #app{width:100%; max-width:600px;}
+  h1{font-size:22px;font-weight:600;text-align:center;margin:0 0 1.5rem;}
+  input{
+    width:100%; height:40px; border-radius:var(--radius); border:1px solid var(--border);
+    background:var(--surface); color:var(--text); font-size:16px; padding:0 12px;
+  }
+  button{
+    font-family:inherit; font-size:14px; padding:10px 18px; border-radius:var(--radius);
+    border:1px solid var(--border); background:var(--surface); color:var(--text);
+    cursor:pointer;
+  }
+  button:hover{background:var(--surface-1);}
+  button:active{transform:scale(0.98);}
+  button:disabled{opacity:0.4; cursor:not-allowed;}
+  .primary{border-color:var(--accent); color:var(--accent); font-weight:600;}
+  .card{
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:1.25rem;
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const COLOR_HEX={red:'#E24B4A',yellow:'#FAC775',green:'#97C459',blue:'#378ADD'};
+
+let view='home';
+let myName='';
+let roomCode='';
+let seatIdx=null;
+let roomState=null;
+let gameState=null;
+let pendingWildIdx=null;
+let joinCodeInput='';
+let error='';
+
+function cardLabelText(v){
+  if(v==='skip')return '⊘';
+  if(v==='reverse')return '⟲';
+  if(v==='draw2')return '+2';
+  if(v==='wild')return '★';
+  if(v==='wild4')return '+4';
+  return v;
+}
+
+function cardHTML(card, opts){
+  opts=opts||{};
+  const isWild = card.color==='wild';
+  const bg = isWild ? '#2C2C2A' : COLOR_HEX[card.color];
+  const clickable = opts.onclick ? 'cursor:pointer;' : '';
+  const dim = opts.dim ? 'opacity:0.5;' : '';
+  const label = cardLabelText(card.value);
+  const wildDots = isWild ? '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;overflow:hidden;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;">'
+    +'<div style="background:'+COLOR_HEX.red+';"></div><div style="background:'+COLOR_HEX.blue+';"></div>'
+    +'<div style="background:'+COLOR_HEX.yellow+';"></div><div style="background:'+COLOR_HEX.green+';"></div>'
+    +'</div>' : '';
+  const oval = isWild ? '' : '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-20deg);width:64px;height:38px;background:#fff;border-radius:50%;"></div>';
+  const streak = isWild ? '' : '<div style="position:absolute;inset:0;background:linear-gradient(115deg, transparent 42%, rgba(255,255,255,0.35) 48%, rgba(255,255,255,0.35) 54%, transparent 60%);"></div>';
+  const centerLabel = isWild ? '' : '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-20deg);font-size:22px;font-weight:700;font-style:italic;color:'+bg+';z-index:2;">'+label+'</div>';
+  const cornerColor = '#ffffff';
+  return '<div onclick="'+(opts.onclick||'')+'" style="position:relative;width:52px;height:76px;border-radius:8px;background:'+bg+';overflow:hidden;flex-shrink:0;transition:transform 0.15s;'+clickable+dim+'border:2px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,0.15);">'
+    +streak+oval+wildDots+centerLabel
+    +'<div style="position:absolute;top:3px;left:5px;font-size:11px;font-weight:700;font-style:italic;color:'+cornerColor+';z-index:2;">'+label+'</div>'
+    +'<div style="position:absolute;bottom:3px;right:5px;font-size:11px;font-weight:700;font-style:italic;color:'+cornerColor+';transform:rotate(180deg);z-index:2;">'+label+'</div>'
+    +'</div>';
+}
+
+function cardBackHTML(w,h){
+  return '<div style="width:'+w+'px;height:'+h+'px;border-radius:6px;background:#1a1a1a;border:2px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,0.15);flex-shrink:0;position:relative;overflow:hidden;">'
+    +'<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-20deg);width:'+Math.round(w*0.85)+'px;height:'+Math.round(h*0.34)+'px;background:'+COLOR_HEX.red+';border-radius:50%;"></div></div>';
+}
+
+function updateName(v){ myName=v; }
+function updateJoinCode(v){ joinCodeInput=v; }
+
+function createRoom(){
+  error='';
+  socket.emit('create_room', myName || 'Player 1', (res)=>{
+    if(!res.ok){ error='Could not create room.'; render(); return; }
+    roomCode=res.code; seatIdx=res.seatIdx; roomState=res.state;
+    view='lobby'; render();
+  });
+}
+function joinRoom(){
+  error='';
+  const c=(joinCodeInput||'').trim().toUpperCase();
+  if(c.length!==4){ error='Enter a 4-letter code.'; render(); return; }
+  socket.emit('join_room', {code:c, name:myName||'Player'}, (res)=>{
+    if(!res.ok){ error=res.error; render(); return; }
+    roomCode=res.code; seatIdx=res.seatIdx; roomState=res.state;
+    view='lobby'; render();
+  });
+}
+function addBot(i){ socket.emit('add_bot', i); }
+function removeSeat(i){ socket.emit('remove_seat', i); }
+function startGame(){ socket.emit('start_game'); }
+function leaveRoom(){ location.reload(); }
+
+function playCard(i){
+  const card = gameState.hands[seatIdx][i];
+  if(!card) return;
+  if(card.color==='wild'){
+    pendingWildIdx=i;
+    render();
+    return;
+  }
+  socket.emit('play_card', {cardIndex:i});
+}
+function chooseColor(c){
+  socket.emit('play_card', {cardIndex:pendingWildIdx, chosenColor:c});
+  pendingWildIdx=null;
+}
+function drawCard(){ socket.emit('draw_card'); }
+function passTurn(){ socket.emit('pass_turn'); }
+function callUno(){ socket.emit('call_uno'); }
+function catchUno(){ socket.emit('catch_uno'); }
+function nextRound(){ socket.emit('next_round'); }
+
+socket.on('room_update', (state)=>{ roomState=state; if(state.started) view='game'; render(); });
+socket.on('game_update', (state)=>{ gameState=state; view='game'; render(); });
+
+function canPlayLocal(card){
+  const g=gameState;
+  if(g.drawPending>0){
+    if(g.drawType==='draw2') return card.value==='draw2';
+    if(g.drawType==='wild4') return false;
+  }
+  const top=g.discardTop;
+  if(card.color==='wild')return true;
+  if(card.color===g.currentColor)return true;
+  if(card.value===top.value)return true;
+  return false;
+}
+
+function render(){
+  const app=document.getElementById('app');
+  let html='<h1>Uno online</h1>';
+
+  if(view==='home'){
+    html+='<div class="card" style="max-width:380px;margin:0 auto 1rem;">';
+    html+='<p style="font-weight:600;margin:0 0 8px;">Your name</p>';
+    html+='<input placeholder="Your name" oninput="updateName(this.value)" style="margin-bottom:1rem;">';
+    html+='<p style="font-weight:600;margin:0 0 8px;">Start a table</p>';
+    html+='<button class="primary" onclick="createRoom()" style="width:100%;margin-bottom:1.25rem;">Create room</button>';
+    html+='<p style="font-weight:600;margin:0 0 8px;">Join a table</p>';
+    html+='<input placeholder="ABCD" maxlength="4" style="text-transform:uppercase;letter-spacing:3px;text-align:center;margin-bottom:8px;" oninput="updateJoinCode(this.value)">';
+    html+='<button onclick="joinRoom()" style="width:100%;">Join room</button>';
+    if(error) html+='<p style="color:var(--danger);font-size:13px;margin-top:8px;">'+error+'</p>';
+    html+='</div>';
+  }
+
+  if(view==='lobby' && roomState){
+    html+='<div class="card" style="max-width:420px;margin:0 auto;">';
+    html+='<div style="text-align:center;margin-bottom:1.25rem;">';
+    html+='<p style="font-size:12px;color:var(--text-muted);margin:0 0 4px;">room code</p>';
+    html+='<p style="font-size:32px;font-weight:700;letter-spacing:5px;margin:0;">'+roomCode+'</p>';
+    html+='<p style="font-size:13px;color:var(--text-2);margin:8px 0 0;">Share this code so others can join at this page.</p>';
+    html+='</div>';
+    html+='<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1.25rem;">';
+    for(let i=0;i<4;i++){
+      const seat=roomState.seats[i];
+      html+='<div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface-1);border-radius:var(--radius);padding:10px 14px;">';
+      if(seat){
+        const you = i===seatIdx ? ' (you)' : '';
+        const status = seat.bot ? ' — bot' : (seat.connected===false ? ' — disconnected' : '');
+        html+='<span style="font-size:14px;">'+seat.name+you+status+'</span>';
+        if(seatIdx===0 && seat.bot){
+          html+='<button onclick="removeSeat('+i+')" style="font-size:12px;padding:4px 10px;">Remove</button>';
+        }
+      } else {
+        html+='<span style="font-size:14px;color:var(--text-muted);">Empty seat</span>';
+        if(seatIdx===0){
+          html+='<button onclick="addBot('+i+')" style="font-size:12px;padding:4px 10px;">Add bot</button>';
+        }
+      }
+      html+='</div>';
+    }
+    html+='</div>';
+    if(seatIdx===0){
+      const filled=roomState.seats.filter(s=>s).length;
+      html+='<button class="primary" onclick="startGame()" '+(filled<2?'disabled':'')+' style="width:100%;">Start game</button>';
+    } else {
+      html+='<p style="text-align:center;font-size:13px;color:var(--text-2);">Waiting for the host to start the game.</p>';
+    }
+    html+='</div>';
+  }
+
+  if(view==='game' && gameState){
+    const g=gameState;
+    const otherSeats=[];
+    for(let off=1;off<4;off++){
+      const idx=(seatIdx+off)%4;
+      if(roomState.seats[idx]) otherSeats.push(idx);
+    }
+
+    html+='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:1rem;">';
+    roomState.seats.forEach((s,i)=>{
+      if(!s) return;
+      const score=roomState.scores[i]||0;
+      const turnMark = g.turn===i ? ' style="border-color:var(--accent);color:var(--accent);"' : '';
+      html+='<div class="card" '+turnMark+' style="padding:8px 12px;flex:1;min-width:110px;">';
+      html+='<p style="font-size:12px;color:var(--text-muted);margin:0;">'+s.name+(i===seatIdx?' (you)':'')+'</p>';
+      html+='<p style="font-size:13px;margin:2px 0 0;">score '+score+' · '+(typeof g.hands[i]==='number'?g.hands[i]:g.hands[i].length)+' cards</p>';
+      html+='</div>';
+    });
+    html+='</div>';
+
+    html+='<div style="display:flex;align-items:center;justify-content:center;gap:20px;margin:1.25rem 0;">';
+    html+='<div style="text-align:center;">';
+    html+='<p style="font-size:12px;color:var(--text-muted);margin:0 0 6px;">deck ('+g.deckCount+')</p>';
+    html+=cardBackHTML(52,76);
+    html+='</div>';
+    html+='<div style="text-align:center;">';
+    html+='<p style="font-size:12px;color:var(--text-muted);margin:0 0 6px;">current color</p>';
+    html+=cardHTML(g.discardTop,{});
+    html+='</div>';
+    html+='</div>';
+
+    html+='<p style="text-align:center;font-size:14px;color:var(--text-2);margin-bottom:1rem;min-height:18px;">'+g.message+'</p>';
+
+    if(g.unoPenaltyAvailable!==null && g.unoPenaltyAvailable!==seatIdx){
+      html+='<div style="text-align:center;margin-bottom:1rem;"><button onclick="catchUno()">Catch! '+roomState.seats[g.unoPenaltyAvailable].name+' forgot uno</button></div>';
+    }
+
+    if(pendingWildIdx!==null){
+      html+='<div style="display:flex;gap:8px;justify-content:center;margin-bottom:1.25rem;">';
+      ['red','yellow','green','blue'].forEach(c=>{
+        html+='<div onclick="chooseColor(\''+c+'\')" style="width:44px;height:44px;border-radius:50%;background:'+COLOR_HEX[c]+';cursor:pointer;border:2px solid #fff;box-shadow:0 1px 2px rgba(0,0,0,0.15);"></div>';
+      });
+      html+='</div>';
+    }
+
+    const myHand = g.hands[seatIdx];
+    if(Array.isArray(myHand)){
+      html+='<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:1.25rem;">';
+      myHand.forEach((c,i)=>{
+        const playable = g.winnerSeat===null && g.turn===seatIdx && pendingWildIdx===null && canPlayLocal(c);
+        html+=cardHTML(c,{onclick:playable?'playCard('+i+')':null, dim: g.turn===seatIdx && !playable && pendingWildIdx===null});
+      });
+      html+='</div>';
+    }
+
+    if(g.winnerSeat===null){
+      const isMyTurn = g.turn===seatIdx;
+      html+='<div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">';
+      const drawLabel = g.drawPending>0 ? 'Draw '+g.drawPending : 'Draw card';
+      html+='<button onclick="drawCard()" '+((!isMyTurn||pendingWildIdx!==null)?'disabled':'')+'>'+drawLabel+'</button>';
+      html+='<button onclick="passTurn()" '+((!isMyTurn||pendingWildIdx!==null||g.drawPending>0)?'disabled':'')+'>Pass turn</button>';
+      if(Array.isArray(myHand) && myHand.length===2){
+        html+='<button onclick="callUno()" '+(g.calledUno[seatIdx]?'disabled':'')+' class="'+(g.calledUno[seatIdx]?'':'primary')+'">'+(g.calledUno[seatIdx]?'Uno called':'Call uno')+'</button>';
+      }
+      html+='</div>';
+    } else {
+      html+='<div style="text-align:center;">';
+      if(seatIdx===0){
+        html+='<button class="primary" onclick="nextRound()">Next round</button>';
+      } else {
+        html+='<p style="font-size:13px;color:var(--text-2);">Waiting for the host to start the next round.</p>';
+      }
+      html+='</div>';
+    }
+  }
+
+  app.innerHTML=html;
+}
+
+render();
+</script>
+</body>
+</html>
