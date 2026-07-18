@@ -81,18 +81,70 @@ function sfxDraw(){ ensureAudio(); beep(220,0.12,'sawtooth',0.04); }
 function sfxWin(){ ensureAudio(); [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,0.22,'triangle',0.06),i*110)); }
 function sfxUno(){ ensureAudio(); beep(880,0.1,'square',0.06); setTimeout(()=>beep(1108,0.14,'square',0.06),90); }
 
-const MELODY=[
-  {n:392,d:0.18},{n:0,d:0.06},{n:440,d:0.18},{n:0,d:0.06},
-  {n:494,d:0.18},{n:0,d:0.06},{n:440,d:0.18},{n:0,d:0.06},
-  {n:392,d:0.18},{n:0,d:0.06},{n:330,d:0.18},{n:0,d:0.06},
-  {n:392,d:0.36},{n:0,d:0.2},
-];
+function kick(){
+  if(!audioCtx) return;
+  const osc=audioCtx.createOscillator();
+  const gain=audioCtx.createGain();
+  osc.type='sine';
+  const now=audioCtx.currentTime;
+  osc.frequency.setValueAtTime(140,now);
+  osc.frequency.exponentialRampToValueAtTime(45,now+0.12);
+  gain.gain.setValueAtTime(0.11,now);
+  gain.gain.exponentialRampToValueAtTime(0.001,now+0.15);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(now);
+  osc.stop(now+0.16);
+}
+function hat(){
+  if(!audioCtx) return;
+  const bufferSize=audioCtx.sampleRate*0.03;
+  const buffer=audioCtx.createBuffer(1,bufferSize,audioCtx.sampleRate);
+  const data=buffer.getChannelData(0);
+  for(let i=0;i<bufferSize;i++) data[i]=(Math.random()*2-1)*(1-i/bufferSize);
+  const src=audioCtx.createBufferSource();
+  src.buffer=buffer;
+  const gain=audioCtx.createGain();
+  gain.gain.value=0.025;
+  src.connect(gain);
+  gain.connect(audioCtx.destination);
+  src.start();
+}
+function bass(freq,dur){
+  if(!audioCtx) return;
+  const osc=audioCtx.createOscillator();
+  const gain=audioCtx.createGain();
+  osc.type='sawtooth';
+  osc.frequency.value=freq;
+  const now=audioCtx.currentTime;
+  gain.gain.setValueAtTime(0,now);
+  gain.gain.linearRampToValueAtTime(0.045,now+0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001,now+dur);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(now);
+  osc.stop(now+dur+0.02);
+}
+
+const STEP_DUR=0.16;
+const BASS_LINE=[147,0,147,196,0,147,110,0];
+const LEAD_LINE=[0,587,0,698,0,784,698,0,0,587,0,698,0,880,784,0];
+const KICK_PATTERN=[1,0,0,1,0,0,1,0];
+const HAT_PATTERN=[0,1,0,1,0,1,0,1];
+
 function scheduleMusic(){
   if(!musicOn || !audioCtx) return;
-  const note=MELODY[musicStep%MELODY.length];
-  if(note.n>0) beep(note.n,note.d*0.9,'triangle',0.025);
+  const step=musicStep%16;
+  if(KICK_PATTERN[step%8]) kick();
+  if(HAT_PATTERN[step%8]) hat();
+  if(step%2===0){
+    const bnote=BASS_LINE[(step/2)%BASS_LINE.length];
+    if(bnote>0) bass(bnote,STEP_DUR*1.8);
+  }
+  const lnote=LEAD_LINE[step%LEAD_LINE.length];
+  if(lnote>0) beep(lnote,STEP_DUR*0.85,'square',0.035);
   musicStep++;
-  musicTimer=setTimeout(scheduleMusic, note.d*1000);
+  musicTimer=setTimeout(scheduleMusic, STEP_DUR*1000);
 }
 function startMusic(){
   ensureAudio();
@@ -411,3 +463,4 @@ render();
 </script>
 </body>
 </html>
+
